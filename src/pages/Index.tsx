@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -197,8 +196,37 @@ const Index = () => {
     saveConfig(newConfig);
     
     setEditingMatch(null);
-    setMatchScores({ ...matchScores, [matchId]: { score1: '', score2: '' } });
+    setMatchScores(prev => {
+      const newScores = { ...prev };
+      delete newScores[matchId];
+      return newScores;
+    });
     toast.success('Resultado salvo com sucesso!');
+  };
+
+  // Start editing a match
+  const startEditingMatch = (matchId: string) => {
+    const match = config.matches.find(m => m.id === matchId);
+    setEditingMatch(matchId);
+    setMatchScores(prev => ({
+      ...prev,
+      [matchId]: {
+        score1: match?.score1?.toString() || '',
+        score2: match?.score2?.toString() || ''
+      }
+    }));
+  };
+
+  // Cancel editing
+  const cancelEditingMatch = () => {
+    if (editingMatch) {
+      setMatchScores(prev => {
+        const newScores = { ...prev };
+        delete newScores[editingMatch];
+        return newScores;
+      });
+    }
+    setEditingMatch(null);
   };
 
   // Calculate player statistics
@@ -528,13 +556,14 @@ const Index = () => {
                                           min="0"
                                           placeholder="0"
                                           value={matchScores[match.id]?.score1 || ''}
-                                          onChange={(e) => setMatchScores({
-                                            ...matchScores,
+                                          onChange={(e) => setMatchScores(prev => ({
+                                            ...prev,
                                             [match.id]: {
-                                              ...matchScores[match.id],
-                                              score1: e.target.value
+                                              ...prev[match.id],
+                                              score1: e.target.value,
+                                              score2: prev[match.id]?.score2 || ''
                                             }
-                                          })}
+                                          }))}
                                           className="w-16 bg-white/10 border-white/20 text-white text-center"
                                         />
                                         <span className="text-white">-</span>
@@ -543,13 +572,13 @@ const Index = () => {
                                           min="0"
                                           placeholder="0"
                                           value={matchScores[match.id]?.score2 || ''}
-                                          onChange={(e) => setMatchScores({
-                                            ...matchScores,
+                                          onChange={(e) => setMatchScores(prev => ({
+                                            ...prev,
                                             [match.id]: {
-                                              ...matchScores[match.id],
+                                              score1: prev[match.id]?.score1 || '',
                                               score2: e.target.value
                                             }
-                                          })}
+                                          }))}
                                           className="w-16 bg-white/10 border-white/20 text-white text-center"
                                         />
                                       </div>
@@ -578,10 +607,7 @@ const Index = () => {
                                       <Button
                                         size="sm"
                                         variant="outline"
-                                        onClick={() => {
-                                          setEditingMatch(null);
-                                          setMatchScores({ ...matchScores, [match.id]: { score1: '', score2: '' } });
-                                        }}
+                                        onClick={cancelEditingMatch}
                                       >
                                         Cancelar
                                       </Button>
@@ -589,16 +615,7 @@ const Index = () => {
                                   ) : (
                                     <Button
                                       size="sm"
-                                      onClick={() => {
-                                        setEditingMatch(match.id);
-                                        setMatchScores({
-                                          ...matchScores,
-                                          [match.id]: {
-                                            score1: match.score1?.toString() || '',
-                                            score2: match.score2?.toString() || ''
-                                          }
-                                        });
-                                      }}
+                                      onClick={() => startEditingMatch(match.id)}
                                       className="bg-blue-600 hover:bg-blue-700"
                                     >
                                       <Edit className="w-4 h-4" />
