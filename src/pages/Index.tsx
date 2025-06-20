@@ -7,7 +7,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
-import { Users, Trophy, Calendar, BarChart3, RotateCcw, Plus, Trash2, Edit, Play } from 'lucide-react';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Users, Trophy, Calendar, BarChart3, RotateCcw, Plus, Trash2, Edit, Play, Shuffle, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Participant {
@@ -16,11 +18,20 @@ interface Participant {
   nickname: string;
 }
 
+interface Team {
+  id: string;
+  name: string;
+  player1Id: string;
+  player2Id: string;
+}
+
 interface Match {
   id: string;
   round: number;
-  player1Id: string;
-  player2Id: string;
+  player1Id?: string;
+  player2Id?: string;
+  team1Id?: string;
+  team2Id?: string;
   score1?: number;
   score2?: number;
   completed: boolean;
@@ -29,11 +40,26 @@ interface Match {
 interface TournamentConfig {
   rounds: number;
   participants: Participant[];
+  teams: Team[];
   matches: Match[];
   created: boolean;
+  mode: 'individual' | 'doubles';
+  doublesMode: 'random' | 'predefined';
 }
 
 interface PlayerStats {
+  id: string;
+  points: number;
+  wins: number;
+  draws: number;
+  losses: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDifference: number;
+  matchesPlayed: number;
+}
+
+interface TeamStats {
   id: string;
   points: number;
   wins: number;
@@ -50,10 +76,14 @@ const Index = () => {
   const [config, setConfig] = useState<TournamentConfig>({
     rounds: 1,
     participants: [],
+    teams: [],
     matches: [],
-    created: false
+    created: false,
+    mode: 'individual',
+    doublesMode: 'random'
   });
   const [newParticipant, setNewParticipant] = useState({ name: '', nickname: '' });
+  const [newTeam, setNewTeam] = useState({ name: '', player1Id: '', player2Id: '' });
   const [editingMatch, setEditingMatch] = useState<string | null>(null);
   const [matchScores, setMatchScores] = useState<{[key: string]: {score1: string, score2: string}}>({});
 
@@ -118,37 +148,188 @@ const Index = () => {
     toast.success('Participante removido com sucesso!');
   };
 
+  // Add team
+  const addTeam = () => {
+    if (!newTeam.name.trim() || !newTeam.player1Id || !newTeam.player2Id) {
+      toast.error('Nome da dupla e ambos os jogadores são obrigatórios!');
+      return;
+    }
+
+    if (newTeam.player1Id === newTeam.player2Id) {
+      toast.error('Os jogadores da dupla devem ser diferentes!');
+      return;
+    }
+
+    if (config.created) {
+      toast.error('Não é possível adicionar duplas com o campeonato já criado!');
+      return;
+    }
+
+    // Check if players are already in other teams
+    const playerInTeam = config.teams.some(team => 
+      team.player1Id === newTeam.player1Id || team.player2Id === newTeam.player1Id ||
+      team.player1Id === newTeam.player2Id || team.player2Id === newTeam.player2Id
+    );
+
+    if (playerInTeam) {
+      toast.error('Um ou ambos os jogadores já estão em outra dupla!');
+      return;
+    }
+
+    const team: Team = {
+      id: Date.now().toString(),
+      name: newTeam.name.trim(),
+      player1Id: newTeam.player1Id,
+      player2Id: newTeam.player2Id
+    };
+
+    const updatedConfig = {
+      ...config,
+      teams: [...config.teams, team]
+    };
+
+    saveConfig(updatedConfig);
+    setNewTeam({ name: '', player1Id: '', player2Id: '' });
+    toast.success('Dupla adicionada com sucesso!');
+  };
+
+  // Remove team
+  const removeTeam = (id: string) => {
+    if (config.created) {
+      toast.error('Não é possível remover duplas com o campeonato já criado!');
+      return;
+    }
+    
+    const updatedConfig = {
+      ...config,
+      teams: config.teams.filter(t => t.id !== id)
+    };
+    saveConfig(updatedConfig);
+    toast.success('Dupla removida com sucesso!');
+  };
+
+  // Generate random teams
+  const generateRandomTeams = () => {
+    if (participants.length < 4 || participants.length % 2 !== 0) {
+      toast.error('É necessário um número par de participantes (mínimo 4) para gerar duplas aleatórias!');
+      return;
+    }
+
+    if (config.created) {
+      toast.error('Não é possível gerar duplas com o campeonato já criado!');
+      return;
+    }
+
+    const shuffledParticipants = [...participants].sort(() => Math.random() - 0.5);
+    const teams: Team[] = [];
+
+    for (let i = 0; i < shuffledParticipants.length; i += 2) {
+      const player1 = shuffledParticipants[i];
+      const player2 = shuffledParticipants[i + 1];
+      
+      teams.push({
+        id: `team-${i / 2 + 1}`,
+        name: `Dupla ${i / 2 + 1}`,
+        player1Id: player1.id,
+        player2Id: player2.id
+      });
+    }
+
+    const updatedConfig = {
+      ...config,
+      teams
+    };
+
+    saveConfig(updatedConfig);
+    toast.success('Duplas geradas aleatoriamente!');
+  };
+
   // Generate matches for all rounds
   const generateMatches = () => {
-    if (participants.length < 2) {
-      toast.error('É necessário pelo menos 2 participantes!');
-      return;
+    if (config.mode === 'individual') {
+      if (participants.length < 2) {
+        toast.error('É necessário pelo menos 2 participantes!');
+        return;
+      }
+    } else {
+      if (config.doublesMode === 'random') {
+        if (participants.length < 4 || participants.length % 2 !== 0) {
+          toast.error('É necessário um número par de participantes (mínimo 4) para duplas!');
+          return;
+        }
+      } else {
+        if (config.teams.length < 2) {
+          toast.error('É necessário pelo menos 2 duplas!');
+          return;
+        }
+      }
     }
 
     const matches: Match[] = [];
     let matchId = 1;
 
+    // Generate teams for doubles mode
+    let teamsToUse = config.teams;
+    if (config.mode === 'doubles' && config.doublesMode === 'random' && config.teams.length === 0) {
+      const shuffledParticipants = [...participants].sort(() => Math.random() - 0.5);
+      teamsToUse = [];
+      
+      for (let i = 0; i < shuffledParticipants.length; i += 2) {
+        teamsToUse.push({
+          id: `team-${i / 2 + 1}`,
+          name: `Dupla ${i / 2 + 1}`,
+          player1Id: shuffledParticipants[i].id,
+          player2Id: shuffledParticipants[i + 1].id
+        });
+      }
+    }
+
     for (let round = 1; round <= config.rounds; round++) {
-      // Generate all possible pairs for each round
-      for (let i = 0; i < participants.length; i++) {
-        for (let j = i + 1; j < participants.length; j++) {
-          // Ida
-          matches.push({
-            id: `${matchId++}`,
-            round,
-            player1Id: participants[i].id,
-            player2Id: participants[j].id,
-            completed: false
-          });
-          
-          // Volta
-          matches.push({
-            id: `${matchId++}`,
-            round,
-            player1Id: participants[j].id,
-            player2Id: participants[i].id,
-            completed: false
-          });
+      if (config.mode === 'individual') {
+        // Generate all possible pairs for each round (individual)
+        for (let i = 0; i < participants.length; i++) {
+          for (let j = i + 1; j < participants.length; j++) {
+            // Ida
+            matches.push({
+              id: `${matchId++}`,
+              round,
+              player1Id: participants[i].id,
+              player2Id: participants[j].id,
+              completed: false
+            });
+            
+            // Volta
+            matches.push({
+              id: `${matchId++}`,
+              round,
+              player1Id: participants[j].id,
+              player2Id: participants[i].id,
+              completed: false
+            });
+          }
+        }
+      } else {
+        // Generate all possible pairs for each round (doubles)
+        for (let i = 0; i < teamsToUse.length; i++) {
+          for (let j = i + 1; j < teamsToUse.length; j++) {
+            // Ida
+            matches.push({
+              id: `${matchId++}`,
+              round,
+              team1Id: teamsToUse[i].id,
+              team2Id: teamsToUse[j].id,
+              completed: false
+            });
+            
+            // Volta
+            matches.push({
+              id: `${matchId++}`,
+              round,
+              team1Id: teamsToUse[j].id,
+              team2Id: teamsToUse[i].id,
+              completed: false
+            });
+          }
         }
       }
     }
@@ -156,6 +337,7 @@ const Index = () => {
     const newConfig = {
       ...config,
       participants: [...participants],
+      teams: teamsToUse,
       matches,
       created: true
     };
@@ -229,8 +411,8 @@ const Index = () => {
     setEditingMatch(null);
   };
 
-  // Calculate player statistics
-  const calculateStats = (): PlayerStats[] => {
+  // Calculate player statistics (for individual mode)
+  const calculatePlayerStats = (): PlayerStats[] => {
     const stats: PlayerStats[] = participants.map(p => ({
       id: p.id,
       points: 0,
@@ -244,7 +426,7 @@ const Index = () => {
     }));
 
     config.matches.forEach(match => {
-      if (match.completed && match.score1 !== undefined && match.score2 !== undefined) {
+      if (match.completed && match.score1 !== undefined && match.score2 !== undefined && match.player1Id && match.player2Id) {
         const player1Stats = stats.find(s => s.id === match.player1Id);
         const player2Stats = stats.find(s => s.id === match.player2Id);
 
@@ -279,7 +461,63 @@ const Index = () => {
       stat.goalDifference = stat.goalsFor - stat.goalsAgainst;
     });
 
-    // Sort by points, then goal difference, then goals for
+    return stats.sort((a, b) => {
+      if (b.points !== a.points) return b.points - a.points;
+      if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
+      return b.goalsFor - a.goalsFor;
+    });
+  };
+
+  // Calculate team statistics (for doubles mode)
+  const calculateTeamStats = (): TeamStats[] => {
+    const stats: TeamStats[] = config.teams.map(t => ({
+      id: t.id,
+      points: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      goalsFor: 0,
+      goalsAgainst: 0,
+      goalDifference: 0,
+      matchesPlayed: 0
+    }));
+
+    config.matches.forEach(match => {
+      if (match.completed && match.score1 !== undefined && match.score2 !== undefined && match.team1Id && match.team2Id) {
+        const team1Stats = stats.find(s => s.id === match.team1Id);
+        const team2Stats = stats.find(s => s.id === match.team2Id);
+
+        if (team1Stats && team2Stats) {
+          team1Stats.matchesPlayed++;
+          team2Stats.matchesPlayed++;
+          
+          team1Stats.goalsFor += match.score1;
+          team1Stats.goalsAgainst += match.score2;
+          team2Stats.goalsFor += match.score2;
+          team2Stats.goalsAgainst += match.score1;
+
+          if (match.score1 > match.score2) {
+            team1Stats.wins++;
+            team1Stats.points += 3;
+            team2Stats.losses++;
+          } else if (match.score1 < match.score2) {
+            team2Stats.wins++;
+            team2Stats.points += 3;
+            team1Stats.losses++;
+          } else {
+            team1Stats.draws++;
+            team1Stats.points += 1;
+            team2Stats.draws++;
+            team2Stats.points += 1;
+          }
+        }
+      }
+    });
+
+    stats.forEach(stat => {
+      stat.goalDifference = stat.goalsFor - stat.goalsAgainst;
+    });
+
     return stats.sort((a, b) => {
       if (b.points !== a.points) return b.points - a.points;
       if (b.goalDifference !== a.goalDifference) return b.goalDifference - a.goalDifference;
@@ -295,8 +533,11 @@ const Index = () => {
     setConfig({
       rounds: 1,
       participants: [],
+      teams: [],
       matches: [],
-      created: false
+      created: false,
+      mode: 'individual',
+      doublesMode: 'random'
     });
     setMatchScores({});
     toast.success('Campeonato resetado com sucesso!');
@@ -307,7 +548,18 @@ const Index = () => {
     return participant ? participant.nickname : 'Desconhecido';
   };
 
-  const stats = calculateStats();
+  const getTeamName = (id: string) => {
+    const team = config.teams.find(t => t.id === id);
+    if (!team) return 'Desconhecido';
+    
+    const player1 = participants.find(p => p.id === team.player1Id);
+    const player2 = participants.find(p => p.id === team.player2Id);
+    
+    return `${team.name} (${player1?.nickname || 'N/A'} + ${player2?.nickname || 'N/A'})`;
+  };
+
+  const playerStats = config.mode === 'individual' ? calculatePlayerStats() : [];
+  const teamStats = config.mode === 'doubles' ? calculateTeamStats() : [];
   const completedMatches = config.matches.filter(m => m.completed).length;
   const totalMatches = config.matches.length;
 
@@ -421,6 +673,111 @@ const Index = () => {
                     </div>
                   )}
                 </div>
+
+                {/* Teams section for doubles mode */}
+                {config.mode === 'doubles' && config.doublesMode === 'predefined' && (
+                  <>
+                    <Separator className="bg-white/20" />
+                    
+                    <div className="space-y-4">
+                      <h3 className="text-white font-semibold flex items-center gap-2">
+                        <UserPlus className="w-5 h-5" />
+                        Configuração de Duplas
+                      </h3>
+                      
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                          <Label htmlFor="teamName" className="text-white">Nome da Dupla</Label>
+                          <Input
+                            id="teamName"
+                            value={newTeam.name}
+                            onChange={(e) => setNewTeam({ ...newTeam, name: e.target.value })}
+                            placeholder="Ex: Os Campeões"
+                            className="bg-white/10 border-white/20 text-white"
+                            disabled={config.created}
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="player1" className="text-white">Jogador 1</Label>
+                          <Select
+                            value={newTeam.player1Id}
+                            onValueChange={(value) => setNewTeam({ ...newTeam, player1Id: value })}
+                            disabled={config.created}
+                          >
+                            <SelectTrigger className="bg-white/10 border-white/20 text-white">
+                              <SelectValue placeholder="Selecione o jogador 1" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {participants.map((participant) => (
+                                <SelectItem key={participant.id} value={participant.id}>
+                                  {participant.nickname}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <Label htmlFor="player2" className="text-white">Jogador 2</Label>
+                          <Select
+                            value={newTeam.player2Id}
+                            onValueChange={(value) => setNewTeam({ ...newTeam, player2Id: value })}
+                            disabled={config.created}
+                          >
+                            <SelectTrigger className="bg-white/10 border-white/20 text-white">
+                              <SelectValue placeholder="Selecione o jogador 2" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {participants.map((participant) => (
+                                <SelectItem key={participant.id} value={participant.id}>
+                                  {participant.nickname}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="flex items-end">
+                          <Button 
+                            onClick={addTeam} 
+                            className="w-full bg-purple-600 hover:bg-purple-700"
+                            disabled={config.created}
+                          >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Adicionar Dupla
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <h4 className="text-white font-medium">Duplas Cadastradas ({config.teams.length})</h4>
+                        {config.teams.length === 0 ? (
+                          <p className="text-gray-400">Nenhuma dupla cadastrada.</p>
+                        ) : (
+                          <div className="grid gap-3">
+                            {config.teams.map((team) => (
+                              <div key={team.id} className="flex items-center justify-between bg-white/5 rounded-lg p-3">
+                                <div>
+                                  <p className="text-white font-medium">{team.name}</p>
+                                  <p className="text-gray-400 text-sm">
+                                    {getParticipantName(team.player1Id)} + {getParticipantName(team.player2Id)}
+                                  </p>
+                                </div>
+                                {!config.created && (
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => removeTeam(team.id)}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
@@ -437,6 +794,60 @@ const Index = () => {
                 {!config.created ? (
                   <>
                     <div>
+                      <Label className="text-white">Modo do Campeonato</Label>
+                      <RadioGroup
+                        value={config.mode}
+                        onValueChange={(value: 'individual' | 'doubles') => setConfig({ ...config, mode: value })}
+                        className="mt-2"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="individual" id="individual" />
+                          <Label htmlFor="individual" className="text-white">Individual (X1)</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="doubles" id="doubles" />
+                          <Label htmlFor="doubles" className="text-white">Duplas (2X2)</Label>
+                        </div>
+                      </RadioGroup>
+                    </div>
+
+                    {config.mode === 'doubles' && (
+                      <div>
+                        <Label className="text-white">Configuração das Duplas</Label>
+                        <RadioGroup
+                          value={config.doublesMode}
+                          onValueChange={(value: 'random' | 'predefined') => setConfig({ ...config, doublesMode: value })}
+                          className="mt-2"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="random" id="random" />
+                            <Label htmlFor="random" className="text-white">Duplas Aleatórias</Label>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <RadioGroupItem value="predefined" id="predefined" />
+                            <Label htmlFor="predefined" className="text-white">Duplas Pré-definidas</Label>
+                          </div>
+                        </RadioGroup>
+                        <p className="text-gray-400 text-sm mt-1">
+                          {config.doublesMode === 'random' 
+                            ? 'As duplas serão formadas automaticamente de forma aleatória' 
+                            : 'Configure as duplas manualmente na aba Participantes'
+                          }
+                        </p>
+
+                        {config.doublesMode === 'random' && participants.length >= 4 && participants.length % 2 === 0 && (
+                          <Button 
+                            onClick={generateRandomTeams}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700"
+                          >
+                            <Shuffle className="w-4 h-4 mr-2" />
+                            Gerar Duplas Aleatórias
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
+                    <div>
                       <Label htmlFor="rounds" className="text-white">Número de Rodadas</Label>
                       <Input
                         id="rounds"
@@ -447,23 +858,45 @@ const Index = () => {
                         className="bg-white/10 border-white/20 text-white"
                       />
                       <p className="text-gray-400 text-sm mt-1">
-                        Em cada rodada, cada jogador enfrentará todos os outros duas vezes (ida e volta)
+                        {config.mode === 'individual' 
+                          ? 'Em cada rodada, cada jogador enfrentará todos os outros duas vezes (ida e volta)'
+                          : 'Em cada rodada, cada dupla enfrentará todas as outras duas vezes (ida e volta)'
+                        }
                       </p>
                     </div>
 
                     <div className="bg-blue-500/20 border border-blue-500/30 rounded-lg p-4">
                       <h4 className="text-blue-200 font-semibold mb-2">Resumo do Campeonato:</h4>
                       <ul className="text-blue-100 text-sm space-y-1">
+                        <li>• Modo: {config.mode === 'individual' ? 'Individual (X1)' : 'Duplas (2X2)'}</li>
+                        {config.mode === 'doubles' && (
+                          <li>• Tipo de Duplas: {config.doublesMode === 'random' ? 'Aleatórias' : 'Pré-definidas'}</li>
+                        )}
                         <li>• Participantes: {participants.length}</li>
+                        {config.mode === 'doubles' && config.doublesMode === 'predefined' && (
+                          <li>• Duplas: {config.teams.length}</li>
+                        )}
                         <li>• Rodadas: {config.rounds}</li>
-                        <li>• Total de partidas: {participants.length >= 2 ? participants.length * (participants.length - 1) * config.rounds : 0}</li>
+                        <li>• Total de partidas: {
+                          config.mode === 'individual' 
+                            ? (participants.length >= 2 ? participants.length * (participants.length - 1) * config.rounds : 0)
+                            : config.doublesMode === 'predefined'
+                              ? (config.teams.length >= 2 ? config.teams.length * (config.teams.length - 1) * config.rounds : 0)
+                              : (participants.length >= 4 && participants.length % 2 === 0 ? (participants.length / 2) * ((participants.length / 2) - 1) * config.rounds : 0)
+                        }</li>
                       </ul>
                     </div>
 
                     <Button 
                       onClick={generateMatches}
                       className="w-full bg-purple-600 hover:bg-purple-700"
-                      disabled={participants.length < 2}
+                      disabled={
+                        config.mode === 'individual' 
+                          ? participants.length < 2
+                          : config.doublesMode === 'predefined'
+                            ? config.teams.length < 2
+                            : participants.length < 4 || participants.length % 2 !== 0
+                      }
                     >
                       <Play className="w-4 h-4 mr-2" />
                       Criar Campeonato
@@ -474,7 +907,14 @@ const Index = () => {
                     <div className="bg-green-500/20 border border-green-500/30 rounded-lg p-4">
                       <h4 className="text-green-200 font-semibold mb-2">✅ Campeonato Criado!</h4>
                       <ul className="text-green-100 text-sm space-y-1">
+                        <li>• Modo: {config.mode === 'individual' ? 'Individual (X1)' : 'Duplas (2X2)'}</li>
+                        {config.mode === 'doubles' && (
+                          <li>• Tipo de Duplas: {config.doublesMode === 'random' ? 'Aleatórias' : 'Pré-definidas'}</li>
+                        )}
                         <li>• Participantes: {config.participants.length}</li>
+                        {config.mode === 'doubles' && (
+                          <li>• Duplas: {config.teams.length}</li>
+                        )}
                         <li>• Rodadas: {config.rounds}</li>
                         <li>• Total de partidas: {config.matches.length}</li>
                         <li>• Partidas concluídas: {completedMatches}/{totalMatches}</li>
@@ -541,7 +981,12 @@ const Index = () => {
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-4 flex-1">
                                   <div className="text-center">
-                                    <p className="text-white font-medium">{getParticipantName(match.player1Id)}</p>
+                                    <p className="text-white font-medium">
+                                      {config.mode === 'individual' 
+                                        ? getParticipantName(match.player1Id || '')
+                                        : getTeamName(match.team1Id || '')
+                                      }
+                                    </p>
                                   </div>
                                   
                                   <div className="text-center px-4">
@@ -590,7 +1035,12 @@ const Index = () => {
                                   </div>
                                   
                                   <div className="text-center">
-                                    <p className="text-white font-medium">{getParticipantName(match.player2Id)}</p>
+                                    <p className="text-white font-medium">
+                                      {config.mode === 'individual' 
+                                        ? getParticipantName(match.player2Id || '')
+                                        : getTeamName(match.team2Id || '')
+                                      }
+                                    </p>
                                   </div>
                                 </div>
                                 
@@ -660,7 +1110,7 @@ const Index = () => {
                         <thead>
                           <tr className="border-b border-white/20">
                             <th className="text-left text-white p-2">Pos</th>
-                            <th className="text-left text-white p-2">Jogador</th>
+                            <th className="text-left text-white p-2">{config.mode === 'individual' ? 'Jogador' : 'Dupla'}</th>
                             <th className="text-center text-white p-2">J</th>
                             <th className="text-center text-white p-2">V</th>
                             <th className="text-center text-white p-2">E</th>
@@ -672,41 +1122,81 @@ const Index = () => {
                           </tr>
                         </thead>
                         <tbody>
-                          {stats.map((stat, index) => {
-                            const participant = participants.find(p => p.id === stat.id);
-                            return (
-                              <tr key={stat.id} className="border-b border-white/10 hover:bg-white/5">
-                                <td className="p-2">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-white font-bold">{index + 1}º</span>
-                                    {index === 0 && <Trophy className="w-4 h-4 text-yellow-400" />}
-                                  </div>
-                                </td>
-                                <td className="p-2">
-                                  <div>
-                                    <p className="text-white font-medium">{participant?.nickname}</p>
-                                    <p className="text-gray-400 text-xs">{participant?.name}</p>
-                                  </div>
-                                </td>
-                                <td className="text-center text-white p-2">{stat.matchesPlayed}</td>
-                                <td className="text-center text-green-400 p-2">{stat.wins}</td>
-                                <td className="text-center text-yellow-400 p-2">{stat.draws}</td>
-                                <td className="text-center text-red-400 p-2">{stat.losses}</td>
-                                <td className="text-center text-white p-2">{stat.goalsFor}</td>
-                                <td className="text-center text-white p-2">{stat.goalsAgainst}</td>
-                                <td className="text-center text-white p-2">
-                                  <span className={stat.goalDifference >= 0 ? 'text-green-400' : 'text-red-400'}>
-                                    {stat.goalDifference > 0 ? '+' : ''}{stat.goalDifference}
-                                  </span>
-                                </td>
-                                <td className="text-center p-2">
-                                  <Badge variant="secondary" className="bg-blue-600 text-white">
-                                    {stat.points}
-                                  </Badge>
-                                </td>
-                              </tr>
-                            );
-                          })}
+                          {config.mode === 'individual' ? (
+                            playerStats.map((stat, index) => {
+                              const participant = participants.find(p => p.id === stat.id);
+                              return (
+                                <tr key={stat.id} className="border-b border-white/10 hover:bg-white/5">
+                                  <td className="p-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-white font-bold">{index + 1}º</span>
+                                      {index === 0 && <Trophy className="w-4 h-4 text-yellow-400" />}
+                                    </div>
+                                  </td>
+                                  <td className="p-2">
+                                    <div>
+                                      <p className="text-white font-medium">{participant?.nickname}</p>
+                                      <p className="text-gray-400 text-xs">{participant?.name}</p>
+                                    </div>
+                                  </td>
+                                  <td className="text-center text-white p-2">{stat.matchesPlayed}</td>
+                                  <td className="text-center text-green-400 p-2">{stat.wins}</td>
+                                  <td className="text-center text-yellow-400 p-2">{stat.draws}</td>
+                                  <td className="text-center text-red-400 p-2">{stat.losses}</td>
+                                  <td className="text-center text-white p-2">{stat.goalsFor}</td>
+                                  <td className="text-center text-white p-2">{stat.goalsAgainst}</td>
+                                  <td className="text-center text-white p-2">
+                                    <span className={stat.goalDifference >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                      {stat.goalDifference > 0 ? '+' : ''}{stat.goalDifference}
+                                    </span>
+                                  </td>
+                                  <td className="text-center p-2">
+                                    <Badge variant="secondary" className="bg-blue-600 text-white">
+                                      {stat.points}
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          ) : (
+                            teamStats.map((stat, index) => {
+                              const team = config.teams.find(t => t.id === stat.id);
+                              return (
+                                <tr key={stat.id} className="border-b border-white/10 hover:bg-white/5">
+                                  <td className="p-2">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-white font-bold">{index + 1}º</span>
+                                      {index === 0 && <Trophy className="w-4 h-4 text-yellow-400" />}
+                                    </div>
+                                  </td>
+                                  <td className="p-2">
+                                    <div>
+                                      <p className="text-white font-medium">{team?.name}</p>
+                                      <p className="text-gray-400 text-xs">
+                                        {getParticipantName(team?.player1Id || '')} + {getParticipantName(team?.player2Id || '')}
+                                      </p>
+                                    </div>
+                                  </td>
+                                  <td className="text-center text-white p-2">{stat.matchesPlayed}</td>
+                                  <td className="text-center text-green-400 p-2">{stat.wins}</td>
+                                  <td className="text-center text-yellow-400 p-2">{stat.draws}</td>
+                                  <td className="text-center text-red-400 p-2">{stat.losses}</td>
+                                  <td className="text-center text-white p-2">{stat.goalsFor}</td>
+                                  <td className="text-center text-white p-2">{stat.goalsAgainst}</td>
+                                  <td className="text-center text-white p-2">
+                                    <span className={stat.goalDifference >= 0 ? 'text-green-400' : 'text-red-400'}>
+                                      {stat.goalDifference > 0 ? '+' : ''}{stat.goalDifference}
+                                    </span>
+                                  </td>
+                                  <td className="text-center p-2">
+                                    <Badge variant="secondary" className="bg-blue-600 text-white">
+                                      {stat.points}
+                                    </Badge>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
                         </tbody>
                       </table>
                     </div>
@@ -720,7 +1210,7 @@ const Index = () => {
                   </CardContent>
                 </Card>
 
-                {stats.length > 0 && (
+                {(playerStats.length > 0 || teamStats.length > 0) && (
                   <Card className="bg-black/20 border-blue-500/30">
                     <CardHeader>
                       <CardTitle className="text-white flex items-center gap-2">
@@ -730,34 +1220,65 @@ const Index = () => {
                     </CardHeader>
                     <CardContent>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {stats.map((stat) => {
-                          const participant = participants.find(p => p.id === stat.id);
-                          const winRate = stat.matchesPlayed > 0 ? (stat.wins / stat.matchesPlayed * 100).toFixed(1) : '0.0';
-                          
-                          return (
-                            <div key={stat.id} className="bg-white/5 rounded-lg p-4">
-                              <h4 className="text-white font-semibold mb-2">{participant?.nickname}</h4>
-                              <div className="space-y-2 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-gray-300">Taxa de vitória:</span>
-                                  <span className="text-white">{winRate}%</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-300">Média de gols/jogo:</span>
-                                  <span className="text-white">
-                                    {stat.matchesPlayed > 0 ? (stat.goalsFor / stat.matchesPlayed).toFixed(1) : '0.0'}
-                                  </span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-gray-300">Defesa/jogo:</span>
-                                  <span className="text-white">
-                                    {stat.matchesPlayed > 0 ? (stat.goalsAgainst / stat.matchesPlayed).toFixed(1) : '0.0'}
-                                  </span>
+                        {config.mode === 'individual' ? (
+                          playerStats.map((stat) => {
+                            const participant = participants.find(p => p.id === stat.id);
+                            const winRate = stat.matchesPlayed > 0 ? (stat.wins / stat.matchesPlayed * 100).toFixed(1) : '0.0';
+                            
+                            return (
+                              <div key={stat.id} className="bg-white/5 rounded-lg p-4">
+                                <h4 className="text-white font-semibold mb-2">{participant?.nickname}</h4>
+                                <div className="space-y-2 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-300">Taxa de vitória:</span>
+                                    <span className="text-white">{winRate}%</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-300">Média de gols/jogo:</span>
+                                    <span className="text-white">
+                                      {stat.matchesPlayed > 0 ? (stat.goalsFor / stat.matchesPlayed).toFixed(1) : '0.0'}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-300">Defesa/jogo:</span>
+                                    <span className="text-white">
+                                      {stat.matchesPlayed > 0 ? (stat.goalsAgainst / stat.matchesPlayed).toFixed(1) : '0.0'}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })
+                        ) : (
+                          teamStats.map((stat) => {
+                            const team = config.teams.find(t => t.id === stat.id);
+                            const winRate = stat.matchesPlayed > 0 ? (stat.wins / stat.matchesPlayed * 100).toFixed(1) : '0.0';
+                            
+                            return (
+                              <div key={stat.id} className="bg-white/5 rounded-lg p-4">
+                                <h4 className="text-white font-semibold mb-2">{team?.name}</h4>
+                                <div className="space-y-2 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-300">Taxa de vitória:</span>
+                                    <span className="text-white">{winRate}%</span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-300">Média de gols/jogo:</span>
+                                    <span className="text-white">
+                                      {stat.matchesPlayed > 0 ? (stat.goalsFor / stat.matchesPlayed).toFixed(1) : '0.0'}
+                                    </span>
+                                  </div>
+                                  <div className="flex justify-between">
+                                    <span className="text-gray-300">Defesa/jogo:</span>
+                                    <span className="text-white">
+                                      {stat.matchesPlayed > 0 ? (stat.goalsAgainst / stat.matchesPlayed).toFixed(1) : '0.0'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
                       </div>
                     </CardContent>
                   </Card>
