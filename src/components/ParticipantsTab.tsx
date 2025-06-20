@@ -338,17 +338,21 @@ export const ParticipantsTab: React.FC<ParticipantsTabProps> = ({
                   </div>
                 )}
               </div>
-
-              {config.doublesMode === 'random' && participants.length >= 4 && participants.length % 2 === 0 && (
-                <Button 
-                  onClick={generateRandomTeams}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700"
-                >
-                  <Shuffle className="w-4 h-4 mr-2" />
-                  Gerar Duplas Aleatórias
-                </Button>
-              )}
             </div>
+          </>
+        )}
+
+        {config.mode === 'doubles' && participants.length >= 4 && participants.length % 2 === 0 && (
+          <>
+            <Separator className="bg-white/20" />
+            <Button 
+              onClick={generateRandomTeams}
+              className="w-full bg-indigo-600 hover:bg-indigo-700"
+              disabled={config.created}
+            >
+              <Shuffle className="w-4 h-4 mr-2" />
+              Gerar Duplas Aleatórias
+            </Button>
           </>
         )}
       </CardContent>
