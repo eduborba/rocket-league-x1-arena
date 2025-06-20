@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Users, Trophy, Calendar, BarChart3, RotateCcw, Plus, Trash2, Edit, Play, Shuffle, UserPlus } from 'lucide-react';
+import { Users, Trophy, Calendar, BarChart3, RotateCcw, Plus, Trash2, Edit, Play, Shuffle, UserPlus, Download, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 
 interface Participant {
@@ -45,6 +45,7 @@ interface TournamentConfig {
   created: boolean;
   mode: 'individual' | 'doubles';
   doublesMode: 'random' | 'predefined';
+  matchFormat: 'round-trip' | 'single';
 }
 
 interface PlayerStats {
@@ -80,12 +81,14 @@ const Index = () => {
     matches: [],
     created: false,
     mode: 'individual',
-    doublesMode: 'random'
+    doublesMode: 'random',
+    matchFormat: 'round-trip'
   });
   const [newParticipant, setNewParticipant] = useState({ name: '', nickname: '' });
   const [newTeam, setNewTeam] = useState({ name: '', player1Id: '', player2Id: '' });
   const [editingMatch, setEditingMatch] = useState<string | null>(null);
   const [matchScores, setMatchScores] = useState<{[key: string]: {score1: string, score2: string}}>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load data from localStorage on component mount
   useEffect(() => {
@@ -244,6 +247,64 @@ const Index = () => {
     toast.success('Duplas geradas aleatoriamente!');
   };
 
+  // Export tournament data to JSON
+  const exportTournamentData = () => {
+    const tournamentData = {
+      participants,
+      config,
+      exportDate: new Date().toISOString(),
+      version: '1.0'
+    };
+
+    const dataStr = JSON.stringify(tournamentData, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `campeonato_rocket_league_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    toast.success('Dados do campeonato exportados com sucesso!');
+  };
+
+  // Import tournament data from JSON
+  const importTournamentData = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const content = e.target?.result as string;
+        const tournamentData = JSON.parse(content);
+        
+        if (tournamentData.participants && tournamentData.config) {
+          setParticipants(tournamentData.participants);
+          setConfig(tournamentData.config);
+          
+          // Save to localStorage
+          localStorage.setItem('rl-tournament-participants', JSON.stringify(tournamentData.participants));
+          localStorage.setItem('rl-tournament-config', JSON.stringify(tournamentData.config));
+          
+          toast.success('Dados do campeonato importados com sucesso!');
+        } else {
+          toast.error('Arquivo inválido! Formato não reconhecido.');
+        }
+      } catch (error) {
+        toast.error('Erro ao importar arquivo! Verifique se é um arquivo JSON válido.');
+      }
+    };
+    reader.readAsText(file);
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   // Generate matches for all rounds
   const generateMatches = () => {
     if (config.mode === 'individual') {
@@ -298,14 +359,16 @@ const Index = () => {
               completed: false
             });
             
-            // Volta
-            matches.push({
-              id: `${matchId++}`,
-              round,
-              player1Id: participants[j].id,
-              player2Id: participants[i].id,
-              completed: false
-            });
+            // Volta (only if round-trip format)
+            if (config.matchFormat === 'round-trip') {
+              matches.push({
+                id: `${matchId++}`,
+                round,
+                player1Id: participants[j].id,
+                player2Id: participants[i].id,
+                completed: false
+              });
+            }
           }
         }
       } else {
@@ -321,14 +384,16 @@ const Index = () => {
               completed: false
             });
             
-            // Volta
-            matches.push({
-              id: `${matchId++}`,
-              round,
-              team1Id: teamsToUse[j].id,
-              team2Id: teamsToUse[i].id,
-              completed: false
-            });
+            // Volta (only if round-trip format)
+            if (config.matchFormat === 'round-trip') {
+              matches.push({
+                id: `${matchId++}`,
+                round,
+                team1Id: teamsToUse[j].id,
+                team2Id: teamsToUse[i].id,
+                completed: false
+              });
+            }
           }
         }
       }
@@ -537,7 +602,8 @@ const Index = () => {
       matches: [],
       created: false,
       mode: 'individual',
-      doublesMode: 'random'
+      doublesMode: 'random',
+      matchFormat: 'round-trip'
     });
     setMatchScores({});
     toast.success('Campeonato resetado com sucesso!');
@@ -574,6 +640,34 @@ const Index = () => {
             Rocket League X1
           </h1>
           <p className="text-xl text-gray-300">Sistema de Gerenciamento de Campeonato</p>
+          
+          {/* Import/Export buttons */}
+          <div className="flex justify-center gap-4 mt-4">
+            <Button
+              onClick={exportTournamentData}
+              className="bg-green-600 hover:bg-green-700"
+              disabled={!config.created}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Exportar Dados
+            </Button>
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={importTournamentData}
+                className="hidden"
+              />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                <Upload className="w-4 h-4 mr-2" />
+                Importar Dados
+              </Button>
+            </div>
+          </div>
         </div>
 
         <Tabs defaultValue="participants" className="space-y-6">
@@ -814,41 +908,64 @@ const Index = () => {
                       </RadioGroup>
                     </div>
 
-                    {config.mode === 'doubles' && (
-                      <div>
-                        <Label className="text-white">Configuração das Duplas</Label>
-                        <RadioGroup
-                          value={config.doublesMode}
-                          onValueChange={(value: 'random' | 'predefined') => setConfig({ ...config, doublesMode: value })}
-                          className="mt-2"
-                        >
-                          <div className="flex items-center space-x-2">
-                            <RadioGroupItem value="random" id="random" />
-                            <Label htmlFor="random" className="text-white">Duplas Aleatórias</Label>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <RadioGroupItem value="predefined" id="predefined" />
-                            <Label htmlFor="predefined" className="text-white">Duplas Pré-definidas</Label>
-                          </div>
-                        </RadioGroup>
-                        <p className="text-gray-400 text-sm mt-1">
-                          {config.doublesMode === 'random' 
-                            ? 'As duplas serão formadas automaticamente de forma aleatória' 
-                            : 'Configure as duplas manualmente na aba Participantes'
-                          }
-                        </p>
+                    <div>
+                      <Label className="text-white">Formato das Partidas</Label>
+                      <RadioGroup
+                        value={config.matchFormat}
+                        onValueChange={(value: 'round-trip' | 'single') => setConfig({ ...config, matchFormat: value })}
+                        className="mt-2"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="round-trip" id="round-trip" />
+                          <Label htmlFor="round-trip" className="text-white">Ida e Volta</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="single" id="single" />
+                          <Label htmlFor="single" className="text-white">Jogo Único</Label>
+                        </div>
+                      </RadioGroup>
+                      <p className="text-gray-400 text-sm mt-1">
+                        {config.matchFormat === 'round-trip' 
+                          ? 'Cada confronto terá duas partidas (ida e volta)' 
+                          : 'Cada confronto terá apenas uma partida'
+                        }
+                      </p>
 
-                        {config.doublesMode === 'random' && participants.length >= 4 && participants.length % 2 === 0 && (
-                          <Button 
-                            onClick={generateRandomTeams}
-                            className="w-full bg-indigo-600 hover:bg-indigo-700"
+                      {config.mode === 'doubles' && (
+                        <div>
+                          <Label className="text-white">Configuração das Duplas</Label>
+                          <RadioGroup
+                            value={config.doublesMode}
+                            onValueChange={(value: 'random' | 'predefined') => setConfig({ ...config, doublesMode: value })}
+                            className="mt-2"
                           >
-                            <Shuffle className="w-4 h-4 mr-2" />
-                            Gerar Duplas Aleatórias
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                            <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="random" id="random" />
+                              <Label htmlFor="random" className="text-white">Duplas Aleatórias</Label>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <RadioGroupItem value="predefined" id="predefined" />
+                              <Label htmlFor="predefined" className="text-white">Duplas Pré-definidas</Label>
+                            </div>
+                          </RadioGroup>
+                          <p className="text-gray-400 text-sm mt-1">
+                            {config.doublesMode === 'random' 
+                              ? 'As duplas serão formadas automaticamente de forma aleatória' 
+                              : 'Configure as duplas manualmente na aba Participantes'
+                            }
+                          </p>
+
+                          {config.doublesMode === 'random' && participants.length >= 4 && participants.length % 2 === 0 && (
+                            <Button 
+                              onClick={generateRandomTeams}
+                              className="w-full bg-indigo-600 hover:bg-indigo-700"
+                            >
+                              <Shuffle className="w-4 h-4 mr-2" />
+                              Gerar Duplas Aleatórias
+                            </Button>
+                          )}
+                        </div>
+                      )}
 
                     <div>
                       <Label htmlFor="rounds" className="text-white">Número de Rodadas</Label>
@@ -862,8 +979,8 @@ const Index = () => {
                       />
                       <p className="text-gray-400 text-sm mt-1">
                         {config.mode === 'individual' 
-                          ? 'Em cada rodada, cada jogador enfrentará todos os outros duas vezes (ida e volta)'
-                          : 'Em cada rodada, cada dupla enfrentará todas as outras duas vezes (ida e volta)'
+                          ? `Em cada rodada, cada jogador enfrentará todos os outros ${config.matchFormat === 'round-trip' ? 'duas vezes (ida e volta)' : 'uma vez'}`
+                          : `Em cada rodada, cada dupla enfrentará todas as outras ${config.matchFormat === 'round-trip' ? 'duas vezes (ida e volta)' : 'uma vez'}`
                         }
                       </p>
                     </div>
@@ -872,6 +989,7 @@ const Index = () => {
                       <h4 className="text-blue-200 font-semibold mb-2">Resumo do Campeonato:</h4>
                       <ul className="text-blue-100 text-sm space-y-1">
                         <li>• Modo: {config.mode === 'individual' ? 'Individual (X1)' : 'Duplas (2X2)'}</li>
+                        <li>• Formato: {config.matchFormat === 'round-trip' ? 'Ida e Volta' : 'Jogo Único'}</li>
                         {config.mode === 'doubles' && (
                           <li>• Tipo de Duplas: {config.doublesMode === 'random' ? 'Aleatórias' : 'Pré-definidas'}</li>
                         )}
@@ -882,10 +1000,10 @@ const Index = () => {
                         <li>• Rodadas: {config.rounds}</li>
                         <li>• Total de partidas: {
                           config.mode === 'individual' 
-                            ? (participants.length >= 2 ? participants.length * (participants.length - 1) * config.rounds : 0)
+                            ? (participants.length >= 2 ? participants.length * (participants.length - 1) * config.rounds * (config.matchFormat === 'round-trip' ? 1 : 0.5) : 0)
                             : config.doublesMode === 'predefined'
-                              ? (config.teams.length >= 2 ? config.teams.length * (config.teams.length - 1) * config.rounds : 0)
-                              : (participants.length >= 4 && participants.length % 2 === 0 ? (participants.length / 2) * ((participants.length / 2) - 1) * config.rounds : 0)
+                              ? (config.teams.length >= 2 ? config.teams.length * (config.teams.length - 1) * config.rounds * (config.matchFormat === 'round-trip' ? 1 : 0.5) : 0)
+                              : (participants.length >= 4 && participants.length % 2 === 0 ? (participants.length / 2) * ((participants.length / 2) - 1) * config.rounds * (config.matchFormat === 'round-trip' ? 1 : 0.5) : 0)
                         }</li>
                       </ul>
                     </div>
@@ -911,6 +1029,7 @@ const Index = () => {
                       <h4 className="text-green-200 font-semibold mb-2">✅ Campeonato Criado!</h4>
                       <ul className="text-green-100 text-sm space-y-1">
                         <li>• Modo: {config.mode === 'individual' ? 'Individual (X1)' : 'Duplas (2X2)'}</li>
+                        <li>• Formato: {config.matchFormat === 'round-trip' ? 'Ida e Volta' : 'Jogo Único'}</li>
                         {config.mode === 'doubles' && (
                           <li>• Tipo de Duplas: {config.doublesMode === 'random' ? 'Aleatórias' : 'Pré-definidas'}</li>
                         )}
