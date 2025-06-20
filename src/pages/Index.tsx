@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -544,11 +545,13 @@ const Index = () => {
   };
 
   const getParticipantName = (id: string) => {
+    if (!participants || participants.length === 0) return 'Carregando...';
     const participant = participants.find(p => p.id === id);
     return participant ? participant.nickname : 'Desconhecido';
   };
 
   const getTeamName = (id: string) => {
+    if (!participants || participants.length === 0) return 'Carregando...';
     const team = config.teams.find(t => t.id === id);
     if (!team) return 'Desconhecido';
     
